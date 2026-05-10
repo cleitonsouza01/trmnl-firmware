@@ -8,7 +8,11 @@
 
 **Tech Stack:** ESP32 (PSRAM-capable variant, e.g. ESP32-WROVER) · Arduino + ESP-IDF (existing framework combo) · PlatformIO `platform = espressif32@6.12.0` · `bitbank2/bb_epaper` (used as renderer only) · `bitbank2/PNGdec` · Unity (native unit tests).
 
-**Reference source:** Waveshare's [`e-Paper`](https://github.com/waveshareteam/e-Paper) repo, `Arduino/epd12in48b/`. The user's local reference at `/Users/cleiton/projects/eletronics/E-Paper_ESP32_Driver_Board_Code` does **not** include this panel — Task 1 brings it in.
+**Reference source:** Waveshare's 12.48" reference, already present locally at:
+- ESP32 port (preferred for command sequences and SPI/pin handling on our target MCU): `/Users/cleiton/projects/eletronics/12.48inch-e-paper/esp32/wifi/EPD_12in48b.{h,cpp}`
+- Arduino reference (panel command sequences for V1 and V2): `/Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b.{h,cpp}` and `EPD_12in48b_V2.{h,cpp}`
+
+V2 is what's currently sold; default to V2 unless inspection of the user's panel marking proves otherwise. Task 1 verifies and locks the choice.
 
 ---
 
@@ -87,52 +91,54 @@ git commit -m "spec: amend 12.48 driver design for PSRAM + composition-based ada
 
 ## Tasks
 
-### Task 1: Bring in the Waveshare 12.48" reference driver
+### Task 1: Inspect the Waveshare 12.48" reference driver (already present locally)
 
-**Files:**
-- Create: `third_party/waveshare-e-paper-reference/` (outside firmware tree — reference only, not compiled)
+**Files:** (no files modified — discovery + notes only)
 
-- [ ] **Step 1: Clone Waveshare's reference repo to a sibling directory**
+The reference is already on disk at `/Users/cleiton/projects/eletronics/12.48inch-e-paper/`. There are two relevant ports inside it; we use the ESP32 port for SPI/pin patterns and the Arduino V2 source for the canonical command sequences.
 
-```bash
-cd /Users/cleiton/projects/eletronics
-git clone --depth 1 https://github.com/waveshareteam/e-Paper.git E-Paper_Reference
-```
-
-- [ ] **Step 2: Verify the 12.48" driver files exist**
+- [ ] **Step 1: List the reference files we'll port from**
 
 ```bash
-ls /Users/cleiton/projects/eletronics/E-Paper_Reference/Arduino/epd12in48b/
+ls /Users/cleiton/projects/eletronics/12.48inch-e-paper/esp32/wifi/
+ls /Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/
 ```
 
-Expected output includes (filenames may have a `_V2` suffix on newer revs):
-- `epd12in48b.h` or `epd12in48b_V2.h`
-- `epd12in48b.cpp` or `epd12in48b_V2.cpp`
-- `imagedata.{h,cpp}` (demo only — ignore)
-- `epd12in48b-demo.ino` (demo entry point — ignore)
+Expected:
+- ESP32 wifi/: `EPD_12in48b.{h,cpp}` (single-version port — Module B; check whether it matches V1 or V2 sequences)
+- Arduino src/: `EPD_12in48b.{h,cpp}` (V1) **and** `EPD_12in48b_V2.{h,cpp}` (V2)
 
-If filenames have `_V2`, use the `_V2` variant throughout the rest of the plan (the Module B sold today is the V2 revision). If both exist, prefer `_V2`. Record the chosen variant in `lib/trmnl_waveshare_1248b/README.md` in Task 4.
-
-- [ ] **Step 3: Identify the four control-pin macros in the reference header**
+- [ ] **Step 2: Decide V1 vs V2**
 
 ```bash
-grep -E "BUSY_M|BUSY_S|CS_M|CS_S|DC_M|DC_S|RST_M|RST_S|EPD_M_|EPD_S_" \
-  /Users/cleiton/projects/eletronics/E-Paper_Reference/Arduino/epd12in48b*/epd12in48b*.h
+head -40 /Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b.h
+head -40 /Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b_V2.h
 ```
 
-These give the **canonical pin assignment** for the 12.48" Module B + ESP32 Driver Board combo. Record the eight GPIO numbers (`M_CS`, `M_DC`, `M_RST`, `M_BUSY`, `S_CS`, `S_DC`, `S_RST`, `S_BUSY`) plus `SCK` and `MOSI` from `DEV_Config.h` in the same reference repo. These are the numbers that go into Task 3's `DEV_Config.h` edit (replacing the placeholders in the spec).
+V2 is what Waveshare ships today as the 12.48" e-Paper Module B (SKU 17299), so **default to V2**. If the user's physical panel has a sticker indicating V1, switch the plan's port source files to the V1 variant (replace `_V2` with `` in all subsequent file references). Record the chosen variant in `lib/trmnl_waveshare_1248b/README.md` (Task 4).
 
-- [ ] **Step 4: Read the init sequence + refresh sequence end-to-end**
+- [ ] **Step 3: Identify the canonical pin assignment**
 
 ```bash
-sed -n '1,400p' /Users/cleiton/projects/eletronics/E-Paper_Reference/Arduino/epd12in48b*/epd12in48b*.cpp
+grep -E "BUSY_M|BUSY_S|CS_M|CS_S|DC_M|DC_S|RST_M|RST_S|EPD_M_|EPD_S_|PIN_|GPIO" \
+  /Users/cleiton/projects/eletronics/12.48inch-e-paper/esp32/wifi/EPD_12in48b.h \
+  /Users/cleiton/projects/eletronics/12.48inch-e-paper/esp32/wifi/EPD_12in48b.cpp 2>/dev/null
 ```
 
-Take notes (kept in a scratch file, not committed) on:
-- Init: which commands are sent to M first, which to S, where the sequences diverge.
-- Display: whether the driver expects `[black-M, black-S, red-M, red-S]` byte order or `[black-full, red-full]` or per-half interleaved.
-- Refresh: the `EPD_12in48B_TurnOnDisplay`-equivalent sequence — which CS is asserted for the master refresh command, and what BUSY waits look like.
-- Sleep: the deep-sleep command(s) per half.
+Record the eight GPIO numbers (`M_CS`, `M_DC`, `M_RST`, `M_BUSY`, `S_CS`, `S_DC`, `S_RST`, `S_BUSY`) plus `SCK` and `MOSI`. These go into Task 3's `DEV_Config.h` edit, replacing the placeholders.
+
+- [ ] **Step 4: Read the init / display / sleep sequences end-to-end**
+
+```bash
+cat /Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b_V2.cpp
+```
+
+(If the chosen variant is V1, read `EPD_12in48b.cpp` instead.) Take notes (kept in a scratch file, **not committed**) on:
+- **Init:** which commands are sent to M first, which to S, where the sequences diverge. Map each command byte to its Waveshare-comment name (e.g. `0x00 // PANEL_SETTING`).
+- **Display:** which command selects the black plane (typically `0x10`) and which selects the red plane (typically `0x13`). Whether each half receives data in row-major top-to-bottom order. Whether the slave half receives data left-to-right (cols 648..1303) or right-to-left.
+- **Refresh:** the `EPD_12in48B_TurnOnDisplay`-equivalent sequence — which CS is asserted for the master refresh command, what BUSY waits look like.
+- **Sleep:** the deep-sleep command(s) per half (typically `0x02` POWER_OFF then `0x07 0xA5` DEEP_SLEEP).
+- **BUSY polarity:** Waveshare's `ReadBusy` loops on `digitalRead(BUSY) == 0` for some panels and `== 1` for others. Note which one V2 uses — this determines the polarity check in `WS1248B::waitBusy` (Task 6 step 2).
 
 These notes drive Tasks 6–8.
 
@@ -692,7 +698,7 @@ bool WS1248B::init() {
 
 - [ ] **Step 3: Port the init sequence verbatim**
 
-Open `/Users/cleiton/projects/eletronics/E-Paper_Reference/Arduino/epd12in48b*/epd12in48b*.cpp`. Locate `EPD_12in48B_Init()` (or `EPD_12in48B_V2_Init()`). Translate it line-by-line into the `<<< INSERT VERBATIM PORT HERE >>>` block using the mapping in the comment above. Do not optimize, reorder, or "improve" — port literally.
+Open `/Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b_V2.cpp`. Locate `EPD_12in48B_Init()` (or `EPD_12in48B_V2_Init()`). Translate it line-by-line into the `<<< INSERT VERBATIM PORT HERE >>>` block using the mapping in the comment above. Do not optimize, reorder, or "improve" — port literally.
 
 - [ ] **Step 4: Build the env to verify it compiles**
 
@@ -722,7 +728,7 @@ The reference driver typically exposes `EPD_12in48B_Display(const uint8_t *black
 - [ ] **Step 1: Read the reference's display function**
 
 ```bash
-sed -n '/EPD_12in48B.*Display(/,/^}/p' /Users/cleiton/projects/eletronics/E-Paper_Reference/Arduino/epd12in48b*/epd12in48b*.cpp
+sed -n '/EPD_12in48B.*Display(/,/^}/p' /Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b_V2.cpp
 ```
 
 Note:
@@ -825,7 +831,7 @@ git commit -m "lib(1248b): WS1248B writeHalfPlane + paired refresh"
 - [ ] **Step 1: Read the reference sleep function**
 
 ```bash
-sed -n '/EPD_12in48B.*Sleep/,/^}/p' /Users/cleiton/projects/eletronics/E-Paper_Reference/Arduino/epd12in48b*/epd12in48b*.cpp
+sed -n '/EPD_12in48B.*Sleep/,/^}/p' /Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b_V2.cpp
 ```
 
 - [ ] **Step 2: Append `sleep()` to `ws1248b.cpp`**
