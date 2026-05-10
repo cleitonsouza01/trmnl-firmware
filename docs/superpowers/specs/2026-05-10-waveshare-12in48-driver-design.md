@@ -36,7 +36,7 @@ The 12.48" Module B is a **dual-controller** panel: two 648×984 halves placed s
 | 1 | Scope is the 12.48" only; design must extend cleanly to other Waveshare displays (§11). |
 | 2 | New build flag `BOARD_WAVESHARE_1248B` selects a dedicated driver path, parallel to `BOARD_X_CLASS`. The existing `BOARD_WAVESHARE_ESP32_DRIVER` env stays untouched. |
 | 3 | Driver source: **Approach A** — port Waveshare's `epd12in48b` reference into `lib/trmnl_waveshare_1248b/` with a thin C++ class plus a bb_epaper-shaped adapter. GxEPD2 (`GxEPD2_1248c`) is a recorded contingency only, used if A stalls. |
-| 4 | Color: PNG-driven, color-aware from day one. Each decoded row is split into M_black / M_red / S_black / S_red and streamed to the panel. No full-frame buffer; no PSRAM dependency. |
+| 4 | Color: PNG-driven, color-aware from day one. Each decoded row is split into M_black / M_red / S_black / S_red and dispatched per half at refresh time. Two ~160 KB plane buffers live in **PSRAM** (required — see §7.1). |
 | 5 | Pin map captured here as Waveshare's published assignment for "12.48" Module B + ESP32 Driver Board"; exact GPIO numbers are locked during implementation against the ported reference driver. |
 | 6 | Halves are always operated in lock-step from the public driver API. BUSY timeout is the primary monitored failure surface. |
 | 7 | Testing: native unit tests for the row splitter and color quantizer, plus an on-device smoke sketch and a field test against the real `/api/display` flow. |
@@ -63,7 +63,7 @@ lib/trmnl_waveshare_1248b/
 ### 5.2 Three layers
 
 - **L1 — `WS1248B`**: ported Waveshare reference driver. Owns SPI bus access, init sequences (full and partial), `writeHalfPlane(half, plane, row, data, len)`, `clearHalf(half)`, `refresh()` (paired), `sleep()` (paired), `init()` (paired). Stays close to Waveshare's reference structure so future upstream fixes are easy to merge.
-- **L2 — `BBEPAdapter1248B`**: implements the subset of bb_epaper's call surface that `display.cpp` actually uses (`width()`, `height()`, `fillScreen()`, `setAddrWindow()`, `startWrite(plane)`, `writeData(buf, len)`, `refresh()`, `sleep()`, `setLightSleep()`, `getCache()`). Hides the M/S split from `display.cpp` and routes each call to the right half(s) via `RowSplitter`.
+- **L2 — `BBEPAdapter1248B`**: presents the bb_epaper call surface to `display.cpp` via *composition*. Embeds a real `BBEPAPER renderer` instance (configured for 1304×984, 3-color, buffers in PSRAM) and forwards all drawing calls (`fillScreen`, `drawPixel`, `setCursor`, `print`, `setFont`, `setTextColor`, `setAddrWindow`, `startWrite`, `writeData`, `loadG5Image`, `getCache`, `capabilities`, etc.) to it unchanged. Overrides `init()` (skips renderer's `initIO`; sets dimensions + 3-color cap), `refresh()` (reads renderer's plane buffers, splits via `RowSplitter`, dispatches per half through `WS1248B`), and `sleep()` (paired deep-sleep on both halves via `WS1248B`). Net effect: `display.cpp` is unchanged for text/primitive/G5 paths — bb_epaper does the rasterizing — but the panel I/O goes through our driver.
 - **L3 — `display.cpp` wiring**: a new `#elif defined(BOARD_WAVESHARE_1248B)` branch instantiates the adapter as `bbep`. Existing rendering code paths remain unchanged.
 
 ### 5.3 Panel geometry
@@ -90,7 +90,8 @@ The slave half's controller pads its line buffer to 656 columns; the visible reg
 
 ### 6.1 Memory & timing
 
-- Per-update working set: 4 × 82 B = ~328 B for row buffers, plus PNG decode workspace (already used by other boards). No frame buffer.
+- Frame buffers: two full 1304×984/8 = 160 392 byte 1bpp planes (black, red) owned by the embedded `BBEPAPER renderer`, allocated in PSRAM via `MALLOC_CAP_SPIRAM` (the existing bb_epaper code already supports this when PSRAM is present).
+- Per-refresh additional working set: 4 × 82 B = ~328 B for row buffers used by `RowSplitter` during dispatch.
 - SPI clock: 8 MHz (matches `bb_epaper`'s default and Waveshare's reference).
 - Full refresh time: ~24–28 s per Waveshare datasheet. The existing display flow already waits for refresh completion; nothing in `main.cpp` needs to change.
 
@@ -106,12 +107,22 @@ The slave half's controller pads its line buffer to 656 columns; the visible reg
 ```ini
 [env:waveshare_1248b]
 extends = env:esp32dev
+board = esp32dev          ; overridden by board_build below to enable PSRAM
+board_build.f_cpu = 240000000L
+board_build.f_flash = 80000000L
+board_build.flash_mode = qio
+board_build.psram = enabled    ; required: ~313 KB plane buffers live here
 build_flags =
     ${env:esp32_base.build_flags}
     -D BOARD_WAVESHARE_1248B
-    -D PNG_MAX_BUFFERED_PIXELS=14984   ; matches X-class for 1304-wide rows
+    -D BOARD_HAS_PSRAM
+    -D CONFIG_SPIRAM_USE_MALLOC=1
+    -D PNG_MAX_BUFFERED_PIXELS=14984
     -D FAKE_BATTERY_VOLTAGE
+lib_ignore =
 ```
+
+> Target hardware: the Waveshare ESP32 Driver Board paired with the 12.48" Module B uses an ESP32 module with 4 MB PSRAM (typically ESP32-WROVER-B). Boards without PSRAM are not supported by this env.
 
 The existing `[env:waveshare-esp32-driver]` env stays untouched.
 
