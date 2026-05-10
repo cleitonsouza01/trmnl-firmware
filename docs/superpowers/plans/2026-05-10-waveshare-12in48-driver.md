@@ -670,11 +670,11 @@ bool WS1248B::init() {
     hardReset(Half::Master);
     hardReset(Half::Slave);
 
-    // === PORTED INIT SEQUENCE (from Waveshare epd12in48b reference) ===
+    // === PORTED INIT SEQUENCE (from Waveshare EPD_12in48b_V2 reference) ===
     //
-    // Transcribe the body of EPD_12in48B_Init() (or EPD_12in48B_V2_Init() if
-    // V2) from /Users/cleiton/projects/eletronics/E-Paper_Reference/Arduino/
-    //   epd12in48b*/epd12in48b*.cpp
+    // Transcribe the body of EPD_12in48B_V2_Init() (or EPD_12in48B_Init() if
+    // the user's panel is the V1 variant) from
+    //   /Users/cleiton/projects/eletronics/12.48inch-e-paper/Arduino/12in48epd/src/EPD_12in48b_V2.cpp
     // verbatim into the block below. Map each Waveshare call as follows:
     //   EPD_M_SendCommand(c)    -> writeCmd(Half::Master, c)
     //   EPD_M_SendData(d)       -> writeData(Half::Master, d)
