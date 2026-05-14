@@ -62,7 +62,7 @@ The XIAO C6's larger internal SRAM is the lever that lets us run GxEPD2's full-f
 | 3 | Architecture: **small `GxEPD2Adapter` class** (Phase 1 surface: `init`, `width`, `height`, `sleep`, `powerOff`, plus an accessor to the underlying GxEPD2 instance for the image-render path) + a new `#elif defined(BOARD_XIAO_ESP32C6_75V1)` branch in `src/display.cpp` that drives `firstPage()/nextPage()/drawPixel` directly during PNG decode. |
 | 4 | Image format: **PNG only** in Phase 1. If the server returns BMP, log a warning and skip rendering. |
 | 5 | Pin map (user-supplied, fixed): SCK=D8/GPIO 19, MOSI=D10/GPIO 18, CS=D3/GPIO 21, DC=D6/GPIO 16, RST=D7/GPIO 17, BUSY=D2/GPIO 2; preserves I²C pads D4 (SDA) / D5 (SCL) for future peripherals. `PIN_INTERRUPT` = GPIO 9 (XIAO boot button). |
-| 6 | Build: pioarduino platform fork (release `55.03.37`), `board = seeed_xiao_esp32c6`, `littlefs` filesystem, GxEPD2 in `lib_deps`, `bb_epaper` in `lib_ignore` for this env. |
+| 6 | Build: pioarduino platform fork (release `55.03.37`), `board = seeed_xiao_esp32c6`, `spiffs` filesystem (matching the non-X-class default in `src/filesystem.cpp`), GxEPD2 in `lib_deps`, `bb_epaper` in `lib_ignore` for this env. |
 | 7 | `MSG` paths: logged no-op in Phase 1. Each call logs `[W] display_show_msg(...) called on xiao_c6_75v1 — UX not implemented in Phase 1`. |
 | 8 | The existing TRMNL captive-portal SoftAP + web UI continue to serve. The user configures Wi-Fi by joining `TRMNL-xxxx` and visiting the portal IP from their phone — there is no on-panel QR or instructions in Phase 1. |
 
@@ -298,7 +298,7 @@ board_build.f_cpu = 160000000L
 board_build.f_flash = 80000000L
 board_build.flash_mode = qio
 board_build.partitions = min_spiffs.csv
-board_build.filesystem = littlefs
+board_build.filesystem = spiffs
 build_flags =
     ${env:esp32_base.build_flags}
     -D BOARD_XIAO_ESP32C6_75V1
