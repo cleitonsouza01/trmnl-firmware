@@ -1,0 +1,22 @@
+{
+  "name": "trmnl_xiao_esp32c6_75v1",
+  "version": "0.1.0",
+  "description": "GxEPD2-based driver adapter for the Waveshare 7.5\" V1 (SKU 13187) on a Seeed XIAO ESP32-C6.",
+  "keywords": ["display", "e-paper", "gxepd2"],
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "authors": [
+    {
+      "name": "TRMNL"
+    }
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "zinggjm/GxEPD2": ">=1.6.0",
+    "adafruit/Adafruit GFX Library": ">=1.11.0",
+    "adafruit/Adafruit BusIO": ">=1.16.0"
+  }
+}

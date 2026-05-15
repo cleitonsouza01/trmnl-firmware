@@ -6,6 +6,180 @@
 #include <preferences_persistence.h>
 #include "DEV_Config.h"
 #define MAX_BIT_DEPTH 8
+
+// ============================================================
+// XIAO ESP32-C6 + Waveshare 7.5" V1 (SKU 13187) — MVP impl.
+// See docs/superpowers/specs/2026-05-14-xiao-esp32c6-75v1-mvp-design.md
+// ============================================================
+#if defined(BOARD_XIAO_ESP32C6_75V1)
+
+#include <SPIFFS.h>
+#include <config.h>
+#include <trmnl_log.h>
+#include "gxepd2_adapter.h"
+
+#define FS SPIFFS
+
+extern Preferences preferences;
+
+static trmnl::GxEPD2Adapter g_adapter(
+    EPD_CS_PIN, EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN,
+    EPD_SCK_PIN, EPD_MOSI_PIN);
+
+// Local PNG decoder state for the image-render path. File-static so the
+// PNGdec callback can reach it.
+static PNG s_png;
+
+// PNGdec draw callback: invoked once per scanline. The TRMNL backend ships
+// 1-bit PNGs where pixel 0 = black, 1 = white — same convention GxEPD2
+// uses, so no inversion is needed. If a particular panel revision shows
+// inverted output during smoke test, change `pixel ?` to `!pixel ?`.
+static int xiao_c6_75v1_pngDraw(PNGDRAW* pDraw) {
+    const uint16_t y    = pDraw->y;
+    const uint8_t* line = pDraw->pPixels;
+    for (uint16_t x = 0; x < pDraw->iWidth; ++x) {
+        const uint8_t byte_idx = x / 8;
+        const uint8_t bit_idx  = 7 - (x % 8);
+        const uint8_t pixel    = (line[byte_idx] >> bit_idx) & 0x01;
+        g_adapter.gx().drawPixel(x, y, pixel ? GxEPD_WHITE : GxEPD_BLACK);
+    }
+    return 1;
+}
+
+static bool xiao_c6_75v1_decode_png(const uint8_t* buf, int len) {
+    int rc = s_png.openRAM(const_cast<uint8_t*>(buf), len,
+                           xiao_c6_75v1_pngDraw);
+    if (rc != PNG_SUCCESS) {
+        Log_error("xiao_c6_75v1: PNG open failed rc=%d", rc);
+        return false;
+    }
+    rc = s_png.decode(nullptr, 0);
+    s_png.close();
+    if (rc != PNG_SUCCESS) {
+        Log_error("xiao_c6_75v1: PNG decode failed rc=%d", rc);
+        return false;
+    }
+    return true;
+}
+
+// ---- Public display API ----
+
+void display_init(void) {
+    Log_info("xiao_c6_75v1: display_init");
+    g_adapter.init();
+}
+
+uint16_t display_width()  { return (uint16_t)g_adapter.width();  }
+uint16_t display_height() { return (uint16_t)g_adapter.height(); }
+
+void display_show_image(uint8_t* image_buffer, int data_size, bool /*bWait*/) {
+    if (image_buffer == nullptr || data_size <= 0) {
+        Log_error("xiao_c6_75v1: display_show_image called with empty buffer");
+        return;
+    }
+
+    // Magic-byte check. We accept PNG only in Phase 1; warn on BMP and skip.
+    static const uint8_t kPngMagic[8] = {0x89,'P','N','G',0x0D,0x0A,0x1A,0x0A};
+    if (data_size >= 8 && memcmp(image_buffer, kPngMagic, 8) == 0) {
+        // PNG path — fall through.
+    } else if (data_size >= 2
+               && image_buffer[0] == 'B' && image_buffer[1] == 'M') {
+        Log_info("xiao_c6_75v1: BMP not supported in Phase 1; skipping render");
+        return;
+    } else {
+        Log_info("xiao_c6_75v1: unknown image format; skipping render");
+        return;
+    }
+
+    Log_info("xiao_c6_75v1: display_show_image start (%d bytes)", data_size);
+    g_adapter.gx().setFullWindow();
+    g_adapter.gx().firstPage();
+    do {
+        g_adapter.gx().fillScreen(GxEPD_WHITE);
+        xiao_c6_75v1_decode_png(image_buffer, data_size);
+    } while (g_adapter.gx().nextPage());
+    g_adapter.powerOff();
+    Log_info("xiao_c6_75v1: display_show_image end");
+}
+
+void display_show_msg(uint8_t* /*image_buffer*/, MSG message_type,
+                      const char* /*message_text*/) {
+    Log_info("xiao_c6_75v1: display_show_msg(type=%d) — on-panel UX not implemented in Phase 1",
+                (int)message_type);
+}
+
+void display_show_msg(uint8_t* /*image_buffer*/, MSG message_type,
+                      String /*friendly_id*/, bool /*id*/,
+                      const char* /*fw_version*/, String /*message*/) {
+    Log_info("xiao_c6_75v1: display_show_msg(type=%d,...) — on-panel UX not implemented in Phase 1",
+                (int)message_type);
+}
+
+void display_show_msg_api(uint8_t* /*image_buffer*/, String /*message*/) {
+    Log_info("xiao_c6_75v1: display_show_msg_api — on-panel UX not implemented in Phase 1");
+}
+
+void display_show_msg_qa(uint8_t* /*image_buffer*/,
+                         const float* /*voltage*/,
+                         const float* /*temperature*/,
+                         bool /*qa_result*/) {
+    Log_info("xiao_c6_75v1: display_show_msg_qa — on-panel UX not implemented in Phase 1");
+}
+
+void display_show_battery(float f) {
+    Log_info("xiao_c6_75v1: display_show_battery(%.2f) — on-panel UX not implemented in Phase 1", f);
+}
+
+void Paint_DrawMultilineText(UWORD /*x_start*/, UWORD /*y_start*/,
+                             const char* /*message*/,
+                             uint16_t /*max_width*/, uint16_t /*font_width*/,
+                             UWORD /*color_fg*/, UWORD /*color_bg*/,
+                             void* /*font*/, bool /*is_center_aligned*/) {
+    Log_info("xiao_c6_75v1: Paint_DrawMultilineText — on-panel UX not implemented in Phase 1");
+}
+
+void display_reset(void) {
+    Log_info("xiao_c6_75v1: display_reset");
+    g_adapter.init();
+}
+
+void display_set_light_sleep(uint8_t /*enabled*/) {
+    // No-op: this board sleeps via esp_deep_sleep, not light-sleep.
+}
+
+void display_sleep(void) {
+    Log_info("xiao_c6_75v1: display_sleep");
+    g_adapter.sleep();
+}
+
+// display_read_file is FS-only logic; kept identical to the existing impl so
+// the callers in bl.cpp work without further branching.
+uint8_t* display_read_file(const char* filename, int* file_size) {
+    File f = FS.open(filename, "r");
+    if (!f) {
+        Log_error("xiao_c6_75v1: failed to open file %s", filename);
+        *file_size = 0;
+        return nullptr;
+    }
+    *file_size = f.size();
+    if (*file_size == 0) {
+        Log_error("xiao_c6_75v1: file %s is empty", filename);
+        f.close();
+        return nullptr;
+    }
+    uint8_t* buffer = (uint8_t*)malloc(*file_size);
+    if (!buffer) {
+        Log_error("xiao_c6_75v1: malloc(%d) failed", *file_size);
+        *file_size = 0;
+        f.close();
+        return nullptr;
+    }
+    f.read(buffer, *file_size);
+    f.close();
+    return buffer;
+}
+
+#else  // !BOARD_XIAO_ESP32C6_75V1 — existing implementation follows
 #ifndef BOARD_X_CLASS
 #define BB_EPAPER
 #include "bb_epaper.h"
@@ -2521,3 +2695,4 @@ void display_sleep(void)
     bbep.deInit();
 #endif
 }
+#endif // !BOARD_XIAO_ESP32C6_75V1

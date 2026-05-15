@@ -132,6 +132,15 @@
    #define EPD_RST_PIN  12
    #define EPD_DC_PIN   11
    #define EPD_BUSY_PIN 13
+#elif defined(BOARD_XIAO_ESP32C6_75V1)
+   // Pin definition for Seeed XIAO ESP32-C6 + Waveshare 7.5" V1 (SKU 13187, GDEW075T8)
+   // Panel driven by GxEPD2_750 on the C6's default SPI bus.
+   #define EPD_SCK_PIN  19    // D8  — default SPI SCK
+   #define EPD_MOSI_PIN 18    // D10 — default SPI MOSI
+   #define EPD_CS_PIN   21    // D3
+   #define EPD_DC_PIN   16    // D6
+   #define EPD_RST_PIN  17    // D7
+   #define EPD_BUSY_PIN  2    // D2
 #elif defined (BOARD_X_CLASS)
 // Parallel Eink devices don't explicitly define GPIO pins for the display here
 #else
