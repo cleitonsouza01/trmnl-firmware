@@ -2,6 +2,71 @@
 
 created for the [TRMNL](https://trmnl.com) e-ink display.
 
+## **Seeed XIAO ESP32-C6 + Waveshare 7.5" V1 (community port)**
+
+This fork adds support for driving a Waveshare 7.5" V1 e-paper raw display (640×384 B/W; SKU 13187; panel GDEW075T8 / IC UC8159c) from a [Seeed XIAO ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/).
+
+Phase 1 (MVP) scope: WiFi connect via the existing TRMNL captive portal, `/api/setup`, `/api/display`, PNG fetch, panel render via [GxEPD2](https://github.com/ZinggJM/GxEPD2)'s `GxEPD2_750` driver, deep-sleep until the next refresh. On-panel UX (captive-portal QR, error screens, BMP/G5 images, fonts) is deferred to a Phase 2 spec — `display_show_msg(...)` calls log a warning and don't touch the panel.
+
+Design + plan docs:
+- `docs/superpowers/specs/2026-05-14-xiao-esp32c6-75v1-mvp-design.md`
+- `docs/superpowers/plans/2026-05-14-xiao-esp32c6-75v1-mvp.md`
+
+### Wiring
+
+| Panel       | XIAO pad | GPIO |
+|-------------|----------|------|
+| VCC         | 3V3      | —    |
+| GND         | GND      | —    |
+| DIN (MOSI)  | D10      | 18   |
+| CLK (SCK)   | D8       | 19   |
+| CS          | D3       | 21   |
+| DC          | D6       | 16   |
+| RST         | D7       | 17   |
+| BUSY        | D2       | 2    |
+
+I²C pads D4 (SDA) / D5 (SCL) are intentionally left free for future peripherals.
+
+### Build & flash
+
+The env uses the [pioarduino fork](https://github.com/pioarduino/platform-espressif32) for ESP32-C6 support (PlatformIO's upstream `espressif32@6.x` doesn't have it yet). All commands below assume you're at the repo root.
+
+```bash
+# Build only (no board needed)
+pio run -e xiao_esp32c6_75v1
+
+# Build + flash + open serial monitor
+pio run -e xiao_esp32c6_75v1 -t upload -t monitor
+
+# Just open the serial monitor (board already flashed)
+pio device monitor -e xiao_esp32c6_75v1
+```
+
+On the first flash the SPIFFS partition will auto-format (`E (xxxx) SPIFFS: mount failed` is expected; the boot continues after `SPIFFS.begin(true)` formats it). If the device gets stuck in a reboot loop on the SPIFFS error, force-erase the flash once:
+
+```bash
+pio run -e xiao_esp32c6_75v1 -t erase
+pio run -e xiao_esp32c6_75v1 -t upload -t monitor
+```
+
+### Framework conflict heads-up
+
+The pioarduino fork wants `framework-arduinoespressif32 @ 3.3.7`, while the rest of the envs in this repo (`trmnl`, `trmnl_4clr`, `waveshare-esp32-driver`, `WAVESHARE_397`) use upstream `espressif32@6.12.0` which wants `~3.20017.0`. Both versions land in `~/.platformio/packages/framework-arduinoespressif32/` and overwrite each other. If you alternate envs and a build fails with `TypeError: ... NoneType ... pioarduino-build.py`, run:
+
+```bash
+rm -rf ~/.platformio/packages/framework-arduinoespressif32
+rm -rf ~/.platformio/packages/framework-arduinoespressif32-libs
+pio run -e xiao_esp32c6_75v1   # or whichever env you wanted
+```
+
+PlatformIO will fetch the correct framework for the env you're building.
+
+### First-flash bootloader
+
+The XIAO ESP32-C6 sometimes needs manual bootloader entry on the very first flash: hold `BOOT` (GPIO 9), tap `RESET`, release `BOOT`. After the first successful flash, subsequent uploads auto-enter the bootloader via USB-CDC reset.
+
+---
+
 ## **Algorithm block scheme**
 
 ```mermaid
@@ -222,69 +287,6 @@ Even when your TRMNL is disconnected (power switch in the off position), its bat
 ## **Version Log**
 
 See [releases](https://github.com/usetrmnl/firmware/releases). For older versions go [here](https://github.com/usetrmnl/firmware/issues/95).
-
-## **Seeed XIAO ESP32-C6 + Waveshare 7.5" V1 (community port)**
-
-This fork adds support for driving a Waveshare 7.5" V1 e-paper raw display (640×384 B/W; SKU 13187; panel GDEW075T8 / IC UC8159c) from a [Seeed XIAO ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/).
-
-Phase 1 (MVP) scope: WiFi connect via the existing TRMNL captive portal, `/api/setup`, `/api/display`, PNG fetch, panel render via [GxEPD2](https://github.com/ZinggJM/GxEPD2)'s `GxEPD2_750` driver, deep-sleep until the next refresh. On-panel UX (captive-portal QR, error screens, BMP/G5 images, fonts) is deferred to a Phase 2 spec — `display_show_msg(...)` calls log a warning and don't touch the panel.
-
-Design + plan docs:
-- `docs/superpowers/specs/2026-05-14-xiao-esp32c6-75v1-mvp-design.md`
-- `docs/superpowers/plans/2026-05-14-xiao-esp32c6-75v1-mvp.md`
-
-### Wiring
-
-| Panel       | XIAO pad | GPIO |
-|-------------|----------|------|
-| VCC         | 3V3      | —    |
-| GND         | GND      | —    |
-| DIN (MOSI)  | D10      | 18   |
-| CLK (SCK)   | D8       | 19   |
-| CS          | D3       | 21   |
-| DC          | D6       | 16   |
-| RST         | D7       | 17   |
-| BUSY        | D2       | 2    |
-
-I²C pads D4 (SDA) / D5 (SCL) are intentionally left free for future peripherals.
-
-### Build & flash
-
-The env uses the [pioarduino fork](https://github.com/pioarduino/platform-espressif32) for ESP32-C6 support (PlatformIO's upstream `espressif32@6.x` doesn't have it yet). All commands below assume you're at the repo root.
-
-```bash
-# Build only (no board needed)
-pio run -e xiao_esp32c6_75v1
-
-# Build + flash + open serial monitor
-pio run -e xiao_esp32c6_75v1 -t upload -t monitor
-
-# Just open the serial monitor (board already flashed)
-pio device monitor -e xiao_esp32c6_75v1
-```
-
-On the first flash the SPIFFS partition will auto-format (`E (xxxx) SPIFFS: mount failed` is expected; the boot continues after `SPIFFS.begin(true)` formats it). If the device gets stuck in a reboot loop on the SPIFFS error, force-erase the flash once:
-
-```bash
-pio run -e xiao_esp32c6_75v1 -t erase
-pio run -e xiao_esp32c6_75v1 -t upload -t monitor
-```
-
-### Framework conflict heads-up
-
-The pioarduino fork wants `framework-arduinoespressif32 @ 3.3.7`, while the rest of the envs in this repo (`trmnl`, `trmnl_4clr`, `waveshare-esp32-driver`, `WAVESHARE_397`) use upstream `espressif32@6.12.0` which wants `~3.20017.0`. Both versions land in `~/.platformio/packages/framework-arduinoespressif32/` and overwrite each other. If you alternate envs and a build fails with `TypeError: ... NoneType ... pioarduino-build.py`, run:
-
-```bash
-rm -rf ~/.platformio/packages/framework-arduinoespressif32
-rm -rf ~/.platformio/packages/framework-arduinoespressif32-libs
-pio run -e xiao_esp32c6_75v1   # or whichever env you wanted
-```
-
-PlatformIO will fetch the correct framework for the env you're building.
-
-### First-flash bootloader
-
-The XIAO ESP32-C6 sometimes needs manual bootloader entry on the very first flash: hold `BOOT` (GPIO 9), tap `RESET`, release `BOOT`. After the first successful flash, subsequent uploads auto-enter the bootloader via USB-CDC reset.
 
 ## **Compilation guide**
 
