@@ -1497,7 +1497,18 @@ void load_prev_image(void)
  */
 static https_request_err_e downloadAndShow()
 {
+#if defined(BOARD_XIAO_ESP32C6_75V1)
+  // Workaround: on Arduino-ESP32 3.3.7 + ESP-IDF 5.5, something in the
+  // download/render path corrupts the heap such that ~ApiDisplayInputs()
+  // asserts in multi_heap_free at function exit. Heap-allocate the inputs
+  // and intentionally leak them — the chip deep-sleeps between cycles,
+  // which resets the heap, so the leak is bounded per cycle. Diagnosing
+  // the underlying corruption is a Phase 2 item; this keeps MVP working.
+  auto* _xiao_inputs = new ApiDisplayInputs(loadApiDisplayInputs(preferences));
+  auto& apiDisplayInputs = *_xiao_inputs;
+#else
   auto apiDisplayInputs = loadApiDisplayInputs(preferences);
+#endif
 
 #ifdef BOARD_TRMNL_X
   if (g_modem && WifiCaptivePortal.getLastCredentials().is5GHz)
