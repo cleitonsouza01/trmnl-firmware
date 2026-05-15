@@ -34,10 +34,18 @@ static PNG s_png;
 // 1-bit PNGs where pixel 0 = black, 1 = white — same convention GxEPD2
 // uses, so no inversion is needed. If a particular panel revision shows
 // inverted output during smoke test, change `pixel ?` to `!pixel ?`.
+//
+// Bounds-checked: if the server ever sends a PNG larger than the panel,
+// drawPixel(x,y) would write past GxEPD2's heap-allocated frame buffer and
+// corrupt adjacent allocations (manifesting as a free() assert during
+// destructors at end-of-frame cleanup). We clamp x/y to the panel size.
 static int xiao_c6_75v1_pngDraw(PNGDRAW* pDraw) {
     const uint16_t y    = pDraw->y;
     const uint8_t* line = pDraw->pPixels;
-    for (uint16_t x = 0; x < pDraw->iWidth; ++x) {
+    if (y >= (uint16_t)GxEPD2_750::HEIGHT) return 1; // skip out-of-bounds row
+    const uint16_t max_x = (uint16_t)GxEPD2_750::WIDTH;
+    const uint16_t end_x = pDraw->iWidth < max_x ? pDraw->iWidth : max_x;
+    for (uint16_t x = 0; x < end_x; ++x) {
         const uint8_t byte_idx = x / 8;
         const uint8_t bit_idx  = 7 - (x % 8);
         const uint8_t pixel    = (line[byte_idx] >> bit_idx) & 0x01;
@@ -53,6 +61,9 @@ static bool xiao_c6_75v1_decode_png(const uint8_t* buf, int len) {
         Log_error("xiao_c6_75v1: PNG open failed rc=%d", rc);
         return false;
     }
+    Log_info("xiao_c6_75v1: PNG dims %dx%d bpp=%d (panel %dx%d)",
+             s_png.getWidth(), s_png.getHeight(), s_png.getBpp(),
+             GxEPD2_750::WIDTH, GxEPD2_750::HEIGHT);
     rc = s_png.decode(nullptr, 0);
     s_png.close();
     if (rc != PNG_SUCCESS) {
