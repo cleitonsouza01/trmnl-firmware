@@ -190,7 +190,229 @@ uint8_t* display_read_file(const char* filename, int* file_size) {
     return buffer;
 }
 
-#else  // !BOARD_XIAO_ESP32C6_75V1 — existing implementation follows
+// ============================================================
+// Waveshare ESP32 Driver Board (SKU 15823, WROVER) + 12.48" Module B
+// (SKU 17299, 1304x984 BWR, four-controller) — MVP impl.
+// See docs/superpowers/specs/2026-05-10-waveshare-12in48-driver-design.md
+// ============================================================
+#elif defined(BOARD_WAVESHARE_1248B)
+
+#include <SPIFFS.h>
+#include <config.h>
+#include <trmnl_log.h>
+#include <esp_heap_caps.h>
+#include "gxepd2_adapter_1248b.h"
+
+#define FS SPIFFS
+
+extern Preferences preferences;
+
+static trmnl::GxEPD2Adapter1248B g_adapter(
+    EPD_M1_CS_PIN, EPD_S1_CS_PIN, EPD_M2_CS_PIN, EPD_S2_CS_PIN,
+    EPD_M1S1_DC_PIN, EPD_M2S2_DC_PIN,
+    EPD_M1S1_RST_PIN, EPD_M2S2_RST_PIN,
+    EPD_M1_BUSY_PIN, EPD_S1_BUSY_PIN, EPD_M2_BUSY_PIN, EPD_S2_BUSY_PIN,
+    EPD_SCK_PIN, EPD_MOSI_PIN);
+
+// Local PNG decoder state for the image-render path. File-static so the
+// PNGdec callback can reach it.
+static PNG s_png_1248b;
+
+// RGB → {GxEPD_WHITE, GxEPD_BLACK, GxEPD_RED} quantizer. Same threshold
+// shape used by other BWR boards in this file. The TRMNL backend is
+// expected to pre-quantize images for this device model server-side, so
+// most pixels will already hit one of three palette entries cleanly.
+// If smoke test shows red/black being swapped on a particular panel
+// revision, swap the GxEPD_BLACK / GxEPD_RED return values here.
+static inline uint16_t waveshare_1248b_rgb_to_3color(uint8_t r,
+                                                     uint8_t g,
+                                                     uint8_t b) {
+    // Strongly red and weakly green/blue → red
+    if (r > 180 && g < 100 && b < 100) return GxEPD_RED;
+    // Dark across the board → black
+    if (r < 100 && g < 100 && b < 100) return GxEPD_BLACK;
+    return GxEPD_WHITE;
+}
+
+// PNGdec draw callback: invoked once per scanline. Uses
+// getLineAsRGB565 + quantizer; this path is independent of the source
+// PNG color type (1-bit, 8-bit indexed, RGB, RGBA all decode to RGB565
+// per row via the library helper).
+//
+// Bounds-checked: clamp x/y to panel size so a too-large server image
+// can't write past GxEPD2's frame buffer (the same defensive pattern
+// the C6 branch uses — see commit 9856bab).
+static int waveshare_1248b_pngDraw(PNGDRAW* pDraw) {
+    const uint16_t y = pDraw->y;
+    if (y >= (uint16_t)GxEPD2_1248c::HEIGHT) return 1;
+
+    const uint16_t max_x = (uint16_t)GxEPD2_1248c::WIDTH;
+    const uint16_t end_x = pDraw->iWidth < max_x ? pDraw->iWidth : max_x;
+
+    // RGB565 line buffer. WIDTH = 1304 → 2608 bytes on the stack per call.
+    // Acceptable: default PlatformIO Arduino task stack on ESP32 is 8 KB.
+    uint16_t line565[GxEPD2_1248c::WIDTH];
+    s_png_1248b.getLineAsRGB565(pDraw, line565,
+                                PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
+
+    for (uint16_t x = 0; x < end_x; ++x) {
+        const uint16_t rgb565 = line565[x];
+        const uint8_t r = ((rgb565 >> 11) & 0x1f) << 3;
+        const uint8_t g = ((rgb565 >>  5) & 0x3f) << 2;
+        const uint8_t b = ( rgb565        & 0x1f) << 3;
+        g_adapter.gx().drawPixel(x, y, waveshare_1248b_rgb_to_3color(r, g, b));
+    }
+    return 1;
+}
+
+static bool waveshare_1248b_decode_png(const uint8_t* buf, int len) {
+    int rc = s_png_1248b.openRAM(const_cast<uint8_t*>(buf), len,
+                                 waveshare_1248b_pngDraw);
+    if (rc != PNG_SUCCESS) {
+        Log_error("waveshare_1248b: PNG open failed rc=%d", rc);
+        return false;
+    }
+    Log_info("waveshare_1248b: PNG dims %dx%d bpp=%d (panel %dx%d)",
+             s_png_1248b.getWidth(), s_png_1248b.getHeight(),
+             s_png_1248b.getBpp(),
+             GxEPD2_1248c::WIDTH, GxEPD2_1248c::HEIGHT);
+    rc = s_png_1248b.decode(nullptr, 0);
+    s_png_1248b.close();
+    if (rc != PNG_SUCCESS) {
+        Log_error("waveshare_1248b: PNG decode failed rc=%d", rc);
+        return false;
+    }
+    return true;
+}
+
+// ---- Public display API ----
+
+void display_init(void) {
+    Log_info("waveshare_1248b: display_init");
+    // PSRAM sanity check — surfaces the WROOM-vs-WROVER mismatch loudly.
+    const size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    const size_t psram_free  = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    Log_info("waveshare_1248b: PSRAM total=%u free=%u",
+             (unsigned)psram_total, (unsigned)psram_free);
+    if (psram_total == 0) {
+        Log_error("waveshare_1248b: PSRAM not detected — board is likely WROOM, "
+                  "not WROVER. Rendering will fall back to paged mode or fail "
+                  "to allocate the BWR frame buffer.");
+    }
+    g_adapter.init();
+}
+
+uint16_t display_width()  { return (uint16_t)g_adapter.width();  }
+uint16_t display_height() { return (uint16_t)g_adapter.height(); }
+
+void display_show_image(uint8_t* image_buffer, int data_size, bool /*bWait*/) {
+    if (image_buffer == nullptr || data_size <= 0) {
+        Log_error("waveshare_1248b: display_show_image called with empty buffer");
+        return;
+    }
+
+    // Magic-byte check. PNG only in Phase 1; warn on BMP and skip.
+    static const uint8_t kPngMagic[8] = {0x89,'P','N','G',0x0D,0x0A,0x1A,0x0A};
+    if (data_size >= 8 && memcmp(image_buffer, kPngMagic, 8) == 0) {
+        // PNG path — fall through.
+    } else if (data_size >= 2
+               && image_buffer[0] == 'B' && image_buffer[1] == 'M') {
+        Log_info("waveshare_1248b: BMP not supported in Phase 1; skipping render");
+        return;
+    } else {
+        Log_info("waveshare_1248b: unknown image format; skipping render");
+        return;
+    }
+
+    Log_info("waveshare_1248b: display_show_image start (%d bytes)", data_size);
+    g_adapter.gx().setFullWindow();
+    g_adapter.gx().firstPage();
+    do {
+        g_adapter.gx().fillScreen(GxEPD_WHITE);
+        waveshare_1248b_decode_png(image_buffer, data_size);
+    } while (g_adapter.gx().nextPage());
+    g_adapter.powerOff();
+    Log_info("waveshare_1248b: display_show_image end");
+}
+
+void display_show_msg(uint8_t* /*image_buffer*/, MSG message_type,
+                      const char* /*message_text*/) {
+    Log_info("waveshare_1248b: display_show_msg(type=%d) — on-panel UX not implemented in Phase 1",
+             (int)message_type);
+}
+
+void display_show_msg(uint8_t* /*image_buffer*/, MSG message_type,
+                      String /*friendly_id*/, bool /*id*/,
+                      const char* /*fw_version*/, String /*message*/) {
+    Log_info("waveshare_1248b: display_show_msg(type=%d,...) — on-panel UX not implemented in Phase 1",
+             (int)message_type);
+}
+
+void display_show_msg_api(uint8_t* /*image_buffer*/, String /*message*/) {
+    Log_info("waveshare_1248b: display_show_msg_api — on-panel UX not implemented in Phase 1");
+}
+
+void display_show_msg_qa(uint8_t* /*image_buffer*/,
+                         const float* /*voltage*/,
+                         const float* /*temperature*/,
+                         bool /*qa_result*/) {
+    Log_info("waveshare_1248b: display_show_msg_qa — on-panel UX not implemented in Phase 1");
+}
+
+void display_show_battery(float f) {
+    Log_info("waveshare_1248b: display_show_battery(%.2f) — on-panel UX not implemented in Phase 1", f);
+}
+
+void Paint_DrawMultilineText(UWORD /*x_start*/, UWORD /*y_start*/,
+                             const char* /*message*/,
+                             uint16_t /*max_width*/, uint16_t /*font_width*/,
+                             UWORD /*color_fg*/, UWORD /*color_bg*/,
+                             void* /*font*/, bool /*is_center_aligned*/) {
+    Log_info("waveshare_1248b: Paint_DrawMultilineText — on-panel UX not implemented in Phase 1");
+}
+
+void display_reset(void) {
+    Log_info("waveshare_1248b: display_reset");
+    g_adapter.init();
+}
+
+void display_set_light_sleep(uint8_t /*enabled*/) {
+    // No-op: this board sleeps via esp_deep_sleep, not light-sleep.
+}
+
+void display_sleep(void) {
+    Log_info("waveshare_1248b: display_sleep");
+    g_adapter.sleep();
+}
+
+// display_read_file is FS-only logic; kept identical to the existing impl so
+// the callers in bl.cpp work without further branching.
+uint8_t* display_read_file(const char* filename, int* file_size) {
+    File f = FS.open(filename, "r");
+    if (!f) {
+        Log_error("waveshare_1248b: failed to open file %s", filename);
+        *file_size = 0;
+        return nullptr;
+    }
+    *file_size = f.size();
+    if (*file_size == 0) {
+        Log_error("waveshare_1248b: file %s is empty", filename);
+        f.close();
+        return nullptr;
+    }
+    uint8_t* buffer = (uint8_t*)malloc(*file_size);
+    if (!buffer) {
+        Log_error("waveshare_1248b: malloc(%d) failed", *file_size);
+        *file_size = 0;
+        f.close();
+        return nullptr;
+    }
+    f.read(buffer, *file_size);
+    f.close();
+    return buffer;
+}
+
+#else  // !BOARD_XIAO_ESP32C6_75V1 && !BOARD_WAVESHARE_1248B — existing implementation follows
 #ifndef BOARD_X_CLASS
 #define BB_EPAPER
 #include "bb_epaper.h"
@@ -2706,4 +2928,4 @@ void display_sleep(void)
     bbep.deInit();
 #endif
 }
-#endif // !BOARD_XIAO_ESP32C6_75V1
+#endif // !BOARD_XIAO_ESP32C6_75V1 && !BOARD_WAVESHARE_1248B
