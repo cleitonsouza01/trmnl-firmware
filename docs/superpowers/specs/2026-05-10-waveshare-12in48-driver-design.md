@@ -119,7 +119,7 @@ No new `test/` directories — there is no pure-logic unit worth native-testing 
 #include <Arduino.h>
 #include <SPI.h>
 #include <GxEPD2_3C.h>
-#include <gdew1248c/GxEPD2_1248c.h>
+#include <epd3c/GxEPD2_1248c.h>
 
 namespace trmnl {
 
@@ -176,12 +176,11 @@ ESP32-only TU — wrap the body of `gxepd2_adapter_1248b.cpp` in `#if defined(AR
 
 ### 5.4 `display.cpp` `BOARD_WAVESHARE_1248B` branch
 
-A new `#elif defined(BOARD_WAVESHARE_1248B)` arm (sibling to `BB_EPAPER`, `BOARD_X_CLASS`, and `BOARD_XIAO_ESP32C6_75V1`). It does **not** define `BB_EPAPER` or `BOARD_X_CLASS`. A new local macro `GXEPD2_DISPLAY` is defined so any later cross-cutting branches can target this code path together with the C6 branch.
+A new `#elif defined(BOARD_WAVESHARE_1248B)` arm (sibling to `BB_EPAPER`, `BOARD_X_CLASS`, and `BOARD_XIAO_ESP32C6_75V1`). It does **not** define `BB_EPAPER` or `BOARD_X_CLASS`. No cross-cutting "GXEPD2 board" umbrella macro is introduced — both GxEPD2-based arms (C6 and this one) stay independent for Phase 1.
 
 ```cpp
 #elif defined(BOARD_WAVESHARE_1248B)
 #include "gxepd2_adapter_1248b.h"
-#define GXEPD2_DISPLAY 1
 
 static trmnl::GxEPD2Adapter1248B g_adapter(
     EPD_M1_CS_PIN, EPD_S1_CS_PIN, EPD_M2_CS_PIN, EPD_S2_CS_PIN,
