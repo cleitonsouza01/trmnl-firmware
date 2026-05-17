@@ -59,6 +59,12 @@ private:
     GxEPD2_1248c_Full _gx;
     int8_t _sck;
     int8_t _mosi;
+    // Stored so init() can re-pinMode them after SPI.begin(). Arduino-ESP32's
+    // SPI.begin() puts the platform's default MISO pin (GPIO 19 on VSPI) into
+    // INPUT mode regardless of the miso argument we pass; that pin happens to
+    // be EPD_S2_CS_PIN on the Waveshare driver board, so without this rescue
+    // S2 stays unselectable and the top-left quadrant never renders.
+    int8_t _cs_m1, _cs_s1, _cs_m2, _cs_s2;
 };
 
 } // namespace trmnl

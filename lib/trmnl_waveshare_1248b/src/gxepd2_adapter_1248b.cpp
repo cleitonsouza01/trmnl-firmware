@@ -30,7 +30,8 @@ GxEPD2Adapter1248B::GxEPD2Adapter1248B(
                        busy_m1, busy_s1,
                        busy_m2, busy_s2)),
       _sck(sck),
-      _mosi(mosi) {}
+      _mosi(mosi),
+      _cs_m1(cs_m1), _cs_s1(cs_s1), _cs_m2(cs_m2), _cs_s2(cs_s2) {}
 
 bool GxEPD2Adapter1248B::init() {
     // 115200 is the serial speed GxEPD2 uses for its optional debug prints;
@@ -39,18 +40,25 @@ bool GxEPD2Adapter1248B::init() {
 
     // GxEPD2's _initSPI() called SPI.begin(_sck, _miso, _mosi, _cs_m1),
     // passing M1_CS (GPIO 23) as the SPI hardware-SS pin. Arduino-ESP32's
-    // SPI.begin() then enables hardware-managed SS, which makes the SPI
-    // peripheral auto-toggle M1_CS on every transaction — even ones
-    // targeted at S1/M2/S2. M1 ends up receiving data meant for the
-    // other three controllers, its frame buffer overflows with garbage,
-    // and the top-left quadrant renders blank.
+    // SPI.begin() then enables hardware-managed SS, which auto-toggles
+    // the SS pin on every transaction — disturbing M1_CS even on writes
+    // targeting other controllers. Re-init SPI here with ss = -1 so M1_CS
+    // is driven only by GxEPD2's manual digitalWrite() calls.
     //
-    // Re-init SPI here with ss = -1 so M1_CS is driven only by GxEPD2's
-    // manual digitalWrite() calls. _initSPI() is only invoked again
-    // during the init-time temperature read; once we override here, the
-    // setting sticks for every refresh thereafter.
+    // SECOND, RELATED PROBLEM: Arduino-ESP32's SPI.begin() also yanks the
+    // platform's default MISO pin (GPIO 19 on VSPI) into INPUT mode even
+    // when we pass miso = -1. On the Waveshare driver board that pin is
+    // EPD_S2_CS_PIN, so without rescue digitalWrite(19, LOW) cannot assert
+    // S2's chip select and the top-left quadrant (which S2 physically
+    // drives) renders blank. Re-pinMode all four CS lines as OUTPUT HIGH
+    // (idle) after SPI.begin() — only S2 is actually clobbered in practice,
+    // but doing all four is defensive and costs nothing.
     SPI.end();
     SPI.begin(_sck, /*miso*/ -1, _mosi, /*ss*/ -1);
+    for (int8_t cs : {_cs_m1, _cs_s1, _cs_m2, _cs_s2}) {
+        pinMode(cs, OUTPUT);
+        digitalWrite(cs, HIGH);
+    }
     return true;
 }
 
