@@ -332,6 +332,10 @@ void display_show_image(uint8_t* image_buffer, int data_size, bool /*bWait*/) {
     g_adapter.gx().setFullWindow();
     g_adapter.gx().firstPage();
     do {
+        // Yield to FreeRTOS between pages so IDLE1 runs and the task
+        // watchdog stays quiet. Paged rendering otherwise hogs the Arduino
+        // core through 5 back-to-back PNG decodes + SPI bursts.
+        delay(1);
         g_adapter.gx().fillScreen(GxEPD_WHITE);
         waveshare_1248b_decode_png(image_buffer, data_size);
     } while (g_adapter.gx().nextPage());

@@ -59,6 +59,18 @@ bool GxEPD2Adapter1248B::init() {
         pinMode(cs, OUTPUT);
         digitalWrite(cs, HIGH);
     }
+
+    // Bump GxEPD2's BUSY timeout from its 20 s default. A full BWR refresh of
+    // this 1304x984 panel takes ~22-26 s in practice (driver datasheet allows
+    // up to ~30 s), so the default fires "Busy Timeout!" on every refresh even
+    // though the panel actually completes. _busy_timeout is protected on
+    // GxEPD2_EPD; the using-declaration in a local derived type re-exposes
+    // it so we can take a pointer-to-member without modifying GxEPD2.
+    struct ExposeBusyTimeout : public GxEPD2_EPD {
+        using GxEPD2_EPD::_busy_timeout;
+    };
+    _gx.epd2.*(&ExposeBusyTimeout::_busy_timeout) = 35000000UL;  // 35 s
+
     return true;
 }
 
