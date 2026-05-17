@@ -14,10 +14,13 @@
 
 namespace trmnl {
 
-// 400000 lets GxEPD2 buffer the full BWR frame in PSRAM in a single page:
-//   2 planes (black + red) * 1304 * 984 / 8 = 320784 bytes.
-// On a WROOM board (no PSRAM) GxEPD2 falls back to paged mode (~5 pages).
-static constexpr unsigned long GXEPD2_1248B_MAX_DISPLAY_BUFFER_SIZE = 400000UL;
+// 65536 buffers ~200 rows per page (2 planes * 1304/8 bytes/row * 200 rows =
+// 65200 bytes), so the full 1304x984 BWR frame renders in 5 passes. Fits in
+// the ESP32 DRAM static BSS on both WROOM (no PSRAM) and WROVER variants —
+// no PSRAM dependency. Going larger would speed renders slightly but pushes
+// us into PSRAM territory and re-introduces the platform fragility the
+// Phase 1 MVP hit on WROOM hardware.
+static constexpr unsigned long GXEPD2_1248B_MAX_DISPLAY_BUFFER_SIZE = 65536UL;
 
 template <typename DRIVER>
 inline constexpr int gxepd2_1248b_max_height() {
