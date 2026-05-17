@@ -329,17 +329,20 @@ void display_show_image(uint8_t* image_buffer, int data_size, bool /*bWait*/) {
     }
 
     Log_info("waveshare_1248b: display_show_image start (%d bytes)", data_size);
+    // Suspend the loop-task watchdog for the render. The first nextPage()
+    // calls GxEPD2's writeScreenBuffer (a ~16 s burst of per-byte SPI
+    // transactions across all 4 quadrants) before any page yields can run,
+    // so a between-pages delay(1) isn't enough — IDLE1 still starves
+    // inside that one call. Re-enable after powerOff().
+    disableLoopWDT();
     g_adapter.gx().setFullWindow();
     g_adapter.gx().firstPage();
     do {
-        // Yield to FreeRTOS between pages so IDLE1 runs and the task
-        // watchdog stays quiet. Paged rendering otherwise hogs the Arduino
-        // core through 5 back-to-back PNG decodes + SPI bursts.
-        delay(1);
         g_adapter.gx().fillScreen(GxEPD_WHITE);
         waveshare_1248b_decode_png(image_buffer, data_size);
     } while (g_adapter.gx().nextPage());
     g_adapter.powerOff();
+    enableLoopWDT();
     Log_info("waveshare_1248b: display_show_image end");
 }
 
