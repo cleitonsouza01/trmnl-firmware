@@ -33,15 +33,24 @@ GxEPD2Adapter1248B::GxEPD2Adapter1248B(
       _mosi(mosi) {}
 
 bool GxEPD2Adapter1248B::init() {
-    // No explicit SPI.begin() here — GxEPD2's _initSPI() (called from
-    // within _gx.init()) will pick up the sck/mosi we passed to the
-    // 15-pin constructor and call SPI.begin(sck, miso, mosi, cs_m1)
-    // itself. Calling it here too would be wasted at best and racy at
-    // worst (the second SPI.begin would clobber the first).
-
     // 115200 is the serial speed GxEPD2 uses for its optional debug prints;
     // matches the project's `monitor_speed`.
     _gx.init(115200);
+
+    // GxEPD2's _initSPI() called SPI.begin(_sck, _miso, _mosi, _cs_m1),
+    // passing M1_CS (GPIO 23) as the SPI hardware-SS pin. Arduino-ESP32's
+    // SPI.begin() then enables hardware-managed SS, which makes the SPI
+    // peripheral auto-toggle M1_CS on every transaction — even ones
+    // targeted at S1/M2/S2. M1 ends up receiving data meant for the
+    // other three controllers, its frame buffer overflows with garbage,
+    // and the top-left quadrant renders blank.
+    //
+    // Re-init SPI here with ss = -1 so M1_CS is driven only by GxEPD2's
+    // manual digitalWrite() calls. _initSPI() is only invoked again
+    // during the init-time temperature read; once we override here, the
+    // setting sticks for every refresh thereafter.
+    SPI.end();
+    SPI.begin(_sck, /*miso*/ -1, _mosi, /*ss*/ -1);
     return true;
 }
 
