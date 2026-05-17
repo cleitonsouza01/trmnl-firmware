@@ -10,7 +10,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <GxEPD2_3C.h>
-#include <gdew1248c/GxEPD2_1248c.h>
+#include <epd3c/GxEPD2_1248c.h>
 
 namespace trmnl {
 
