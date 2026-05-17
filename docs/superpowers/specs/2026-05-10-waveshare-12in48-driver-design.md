@@ -2,7 +2,7 @@
 
 **Status:** Approved (brainstorming) — pending implementation plan
 **Date:** 2026-05-10
-**Revised:** 2026-05-16 (panel topology + library choice corrected — see §1.1)
+**Revised:** 2026-05-16 (panel topology + library choice corrected — see §1.1); 2026-05-17 (paged-mode default for WROOM support — see §1.2)
 **Target hardware:** Waveshare ESP32 Driver Board (SKU 15823, ESP32-WROVER variant — PSRAM required) + 12.48" e-Paper Module B (SKU 17299, part number `12.48inch e-paper Module (B)`, 1304×984, 3-color black/white/red, **four onboard controllers**)
 
 ## 1. Goal
@@ -18,6 +18,17 @@ The original 2026-05-10 draft assumed a **dual-controller** panel (two halves M 
 3. **GxEPD2 already supports this exact panel** as `GxEPD2_1248c` — its 12-pin constructor maps directly to the four-controller topology, hardware-SPI is used internally, and the same library was just shipped in the May-14 XIAO-C6 / 7.5"V1 branch.
 
 The revision therefore pivots from "port Waveshare reference + custom row splitter" to "**GxEPD2 + thin adapter**", mirroring the proven `lib/trmnl_xiao_esp32c6_75v1/` pattern. The custom `WS1248B` driver, `BBEPAdapter1248B`, and `RowSplitter` are removed; the in-tree library becomes a small adapter only.
+
+### 1.2 What changed in the 2026-05-17 revision
+
+Hardware-on-the-bench confirmed the user's Waveshare ESP32 Driver Board ships with the **ESP32-WROOM-32E** module (no external PSRAM), not the WROVER variant the Phase 1 design assumed. The Phase 1 binary boots but aborts in `display_init` when `heap_caps_get_total_size(MALLOC_CAP_SPIRAM)` returns 0. Rather than require the user to swap modules, the design pivots:
+
+1. **Single-env paged-mode default.** Drop `MAX_DISPLAY_BUFFER_SIZE` from 400 000 to 65 536. `GxEPD2_3C<GxEPD2_1248c, …>` instantiates with ~200-row planes, so the full 1304×984 BWR frame renders in 5 passes. Total adapter sizeof ≈ 65 KB.
+2. **DRAM-resident static adapter.** Revert from `heap_caps_malloc(MALLOC_CAP_SPIRAM)` + placement-new (the Phase 1 workaround for the dual-framework PSRAM-init fragility) back to a plain file-static instance. ~65 KB in static BSS is comfortable on both WROOM (~256 KB DRAM total) and WROVER variants — no PSRAM dependency at all.
+3. **Drop `board_build.psram = enabled`, `BOARD_HAS_PSRAM`, `CONFIG_SPIRAM_USE_MALLOC=1`** from `[env:waveshare_1248b]`. The PSRAM detection check in `display_init` is also removed (no longer relevant).
+4. **WROOM is no longer a non-goal.** §2's "Boards without PSRAM" exclusion is dropped (see implementation plan `docs/superpowers/plans/2026-05-17-waveshare-1248b-wroom-fallback.md`).
+
+Sections §4 (decision #6), §5.3 (adapter header constant), §5.4 (display.cpp branch), §6.1 (memory budget), §7.1 (env), §10 (risks), and §13 (acceptance criteria) describe the Phase 1 PSRAM-required behavior — they remain accurate as historical record but the **shipped behavior is the §1.2 design**. A follow-up clean-up pass can fold §1.2 into those sections; for now the divergence is small and the §1.2 summary plus the implementation plan are authoritative.
 
 ## 2. Non-goals
 
@@ -119,7 +130,7 @@ No new `test/` directories — there is no pure-logic unit worth native-testing 
 #include <Arduino.h>
 #include <SPI.h>
 #include <GxEPD2_3C.h>
-#include <gdew1248c/GxEPD2_1248c.h>
+#include <epd3c/GxEPD2_1248c.h>
 
 namespace trmnl {
 
@@ -176,12 +187,11 @@ ESP32-only TU — wrap the body of `gxepd2_adapter_1248b.cpp` in `#if defined(AR
 
 ### 5.4 `display.cpp` `BOARD_WAVESHARE_1248B` branch
 
-A new `#elif defined(BOARD_WAVESHARE_1248B)` arm (sibling to `BB_EPAPER`, `BOARD_X_CLASS`, and `BOARD_XIAO_ESP32C6_75V1`). It does **not** define `BB_EPAPER` or `BOARD_X_CLASS`. A new local macro `GXEPD2_DISPLAY` is defined so any later cross-cutting branches can target this code path together with the C6 branch.
+A new `#elif defined(BOARD_WAVESHARE_1248B)` arm (sibling to `BB_EPAPER`, `BOARD_X_CLASS`, and `BOARD_XIAO_ESP32C6_75V1`). It does **not** define `BB_EPAPER` or `BOARD_X_CLASS`. No cross-cutting "GXEPD2 board" umbrella macro is introduced — both GxEPD2-based arms (C6 and this one) stay independent for Phase 1.
 
 ```cpp
 #elif defined(BOARD_WAVESHARE_1248B)
 #include "gxepd2_adapter_1248b.h"
-#define GXEPD2_DISPLAY 1
 
 static trmnl::GxEPD2Adapter1248B g_adapter(
     EPD_M1_CS_PIN, EPD_S1_CS_PIN, EPD_M2_CS_PIN, EPD_S2_CS_PIN,

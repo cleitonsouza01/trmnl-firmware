@@ -141,6 +141,38 @@
    #define EPD_DC_PIN   16    // D6
    #define EPD_RST_PIN  17    // D7
    #define EPD_BUSY_PIN  2    // D2
+#elif defined(BOARD_WAVESHARE_1248B)
+   // Pin definition for Waveshare ESP32 Driver Board (SKU 15823, WROVER variant)
+   // + 12.48" e-Paper Module B (SKU 17299). Four-controller panel driven via
+   // GxEPD2's GxEPD2_1248c class on hardware SPI.
+   //
+   // Reference: Waveshare's "12.48inch-e-paper" sample repo
+   //   (esp32/esp32-epd-12in48/src/DEV_Config.h on GitHub:
+   //    https://github.com/waveshareteam/12.48inch-e-paper)
+
+   // Shared SPI bus
+   #define EPD_SCK_PIN        13
+   #define EPD_MOSI_PIN       14
+
+   // Per-quadrant CS
+   #define EPD_M1_CS_PIN      23   // top-left
+   #define EPD_S1_CS_PIN      22   // top-right
+   #define EPD_M2_CS_PIN      16   // bottom-left
+   #define EPD_S2_CS_PIN      19   // bottom-right
+
+   // DC shared per half
+   #define EPD_M1S1_DC_PIN    25   // top half data/command select
+   #define EPD_M2S2_DC_PIN    17   // bottom half data/command select
+
+   // RST shared per half
+   #define EPD_M1S1_RST_PIN   33   // top half reset
+   #define EPD_M2S2_RST_PIN    5   // bottom half reset
+
+   // Per-quadrant BUSY
+   #define EPD_M1_BUSY_PIN    32
+   #define EPD_S1_BUSY_PIN    26
+   #define EPD_M2_BUSY_PIN    18
+   #define EPD_S2_BUSY_PIN     4
 #elif defined (BOARD_X_CLASS)
 // Parallel Eink devices don't explicitly define GPIO pins for the display here
 #else
