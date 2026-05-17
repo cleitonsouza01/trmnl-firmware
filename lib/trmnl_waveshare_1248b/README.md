@@ -1,6 +1,6 @@
 # trmnl_waveshare_1248b
 
-GxEPD2-based driver adapter for the Waveshare 12.48" e-Paper Module B (SKU 17299; 1304×984 black/white/red, four onboard controllers) on the Waveshare ESP32 Driver Board (SKU 15823, **WROVER variant — PSRAM required**).
+GxEPD2-based driver adapter for the Waveshare 12.48" e-Paper Module B (SKU 17299; 1304×984 black/white/red, four onboard controllers) on the Waveshare ESP32 Driver Board (SKU 15823). Works on both WROOM-32 and WROVER-B variants — paged-mode rendering keeps the frame buffer in DRAM, no PSRAM dependency.
 
 ## Status
 
@@ -33,9 +33,9 @@ Phase 2 (separate spec) will layer in text/QR/MSG rendering by forwarding to GxE
 
 The Waveshare ESP32 Driver Board's flat-flex socket for the panel is pre-wired to these pins via the on-board level shifter — no manual jumpers needed when using the stock cable.
 
-## Hardware variant check
+## Rendering strategy
 
-Some lots of the Waveshare ESP32 Driver Board ship with ESP32-WROOM-32 (no PSRAM); this env is built for the ESP32-WROVER-B variant (4 MB PSRAM) because the full BWR frame buffer is ~320 KB. The implementation logs `esp_psram_get_size()` during `display_init`; if it reports 0, the board is WROOM and rendering will either fall back to slow paged mode or run out of heap.
+Paged mode: `GxEPD2_3C<GxEPD2_1248c, ~200>` buffers ~200 rows at a time (~65 KB in DRAM static BSS), rendering the full 1304×984 BWR frame in 5 passes. PNG decode runs once per pass; GxEPD2's `drawPixel` skips pixels outside the current page window so the per-pass cost is small. Total frame time: ~35–45 s (mostly panel refresh).
 
 ## Build
 

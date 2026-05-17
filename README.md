@@ -4,7 +4,7 @@ created for the [TRMNL](https://trmnl.com) e-ink display.
 
 ## **Waveshare ESP32 Driver Board + 12.48" Module B (community port)**
 
-This fork adds support for driving the Waveshare 12.48" e-Paper Module B (1304×984 black/white/red, SKU 17299, **four-controller panel**) from a Waveshare ESP32 Driver Board (SKU 15823, **WROVER variant — PSRAM required**) via [GxEPD2](https://github.com/ZinggJM/GxEPD2)'s `GxEPD2_1248c` driver class.
+This fork adds support for driving the Waveshare 12.48" e-Paper Module B (1304×984 black/white/red, SKU 17299, **four-controller panel**) from a Waveshare ESP32 Driver Board (SKU 15823) via [GxEPD2](https://github.com/ZinggJM/GxEPD2)'s `GxEPD2_1248c` driver class. Works on both the **WROOM-32** (no PSRAM) and **WROVER-B** (with PSRAM) variants of the driver board.
 
 Phase 1 (MVP) scope: WiFi connect via the existing TRMNL captive portal, `/api/setup`, `/api/display`, PNG fetch, BWR render via GxEPD2, deep-sleep until the next refresh. On-panel UX (captive-portal QR, error screens, BMP/G5 images, fonts) is deferred to a Phase 2 spec — `display_show_msg(...)` calls log a warning and don't touch the panel.
 
@@ -50,7 +50,7 @@ pio device monitor -e waveshare_1248b
 
 ### Hardware variant check
 
-Some lots of the Waveshare ESP32 Driver Board ship with ESP32-WROOM-32 (no PSRAM); this env is built for the ESP32-WROVER-B variant (4 MB PSRAM). The firmware logs `esp_psram_get_size()` on boot; if it reports 0, your board is WROOM and rendering will either fall back to slow paged mode or fail to allocate the BWR frame buffer.
+Both WROOM-32 and WROVER-B variants of the driver board are supported. The firmware uses paged-mode rendering with a ~65 KB DRAM frame buffer — no PSRAM required. A full panel refresh takes roughly 35–45 s (the panel itself dominates; the 5 paged passes add ~5 s of decode work).
 
 ---
 
