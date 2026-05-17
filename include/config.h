@@ -42,8 +42,8 @@
 
 #define DISPLAY_BMP_IMAGE_SIZE 48062 // in bytes - 62 bytes - header; 48000 bytes - bitmap (480*800 1bpp) / 8
 #define DEFAULT_IMAGE_SIZE 48000
-#if defined( BOARD_TRMNL_X ) || defined (BOARD_TRMNL_X_EPDIY)
-#define MAX_IMAGE_SIZE 750000 // Use PSRAM on the ESP32-S3
+#if defined( BOARD_TRMNL_X ) || defined (BOARD_TRMNL_X_EPDIY) || defined(BOARD_WAVESHARE_1248B)
+#define MAX_IMAGE_SIZE 750000 // Use PSRAM (ESP32-S3 on X-class; WROVER on waveshare_1248b)
 #else
 #define MAX_IMAGE_SIZE 90000 // largest compressed image we can receive
 #endif
@@ -152,6 +152,12 @@ enum WIFI_CONNECT_RETRY_TIME // Time to sleep before trying to connect to the Wi
 #elif defined(BOARD_XIAO_ESP32C6_75V1)
 #define DEVICE_MODEL "xiao_c6_75v1"
 #define PIN_INTERRUPT 9         // XIAO ESP32-C6 internal boot button (BOOT/GPIO9)
+#define FAKE_BATTERY_VOLTAGE
+#elif defined(BOARD_WAVESHARE_1248B)
+#define DEVICE_MODEL "waveshare_1248b"
+#define PIN_INTERRUPT 0         // BOOT button on the Waveshare ESP32 Driver Board.
+                                // GPIO 33 (used by BOARD_WAVESHARE_ESP32_DRIVER) is
+                                // taken by EPD_M1S1_RST_PIN on the 12.48"B wiring.
 #define FAKE_BATTERY_VOLTAGE
 #endif
 
