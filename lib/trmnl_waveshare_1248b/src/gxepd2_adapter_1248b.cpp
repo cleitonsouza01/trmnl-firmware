@@ -14,7 +14,17 @@ GxEPD2Adapter1248B::GxEPD2Adapter1248B(
     int8_t busy_m1, int8_t busy_s1,
     int8_t busy_m2, int8_t busy_s2,
     int8_t sck, int8_t mosi)
-    : _gx(GxEPD2_1248c(cs_m1, cs_s1, cs_m2, cs_s2,
+    // Use GxEPD2_1248c's 15-pin constructor (the one its source comment
+    // calls out as "for Waveshare ESP32 driver board mounted on connection
+    // board"). The 12-pin overload defaults _sck/_miso/_mosi to the
+    // platform's SPI macros (VSPI 18/19/23 on ESP32), which means
+    // GxEPD2::_initSPI() does a plain SPI.begin() and routes SPI to those
+    // pins — colliding with our M2_BUSY (GPIO 18) and M1_CS (GPIO 23)
+    // wiring and starving the panel of any actual SPI clock on GPIO 13.
+    // Passing sck/mosi explicitly here lets GxEPD2 do SPI.begin(sck, miso,
+    // mosi, cs_m1) internally and route SPI to our actual wiring.
+    : _gx(GxEPD2_1248c(sck, /*miso*/ -1, mosi,
+                       cs_m1, cs_s1, cs_m2, cs_s2,
                        dc1, dc2,
                        rst1, rst2,
                        busy_m1, busy_s1,
@@ -23,9 +33,11 @@ GxEPD2Adapter1248B::GxEPD2Adapter1248B(
       _mosi(mosi) {}
 
 bool GxEPD2Adapter1248B::init() {
-    // Explicit SPI.begin so the bus is pinned to the Driver Board's stock
-    // SCK/MOSI; survives any future board-default changes.
-    SPI.begin(_sck, /*miso*/ -1, _mosi, /*ss*/ -1);
+    // No explicit SPI.begin() here — GxEPD2's _initSPI() (called from
+    // within _gx.init()) will pick up the sck/mosi we passed to the
+    // 15-pin constructor and call SPI.begin(sck, miso, mosi, cs_m1)
+    // itself. Calling it here too would be wasted at best and racy at
+    // worst (the second SPI.begin would clobber the first).
 
     // 115200 is the serial speed GxEPD2 uses for its optional debug prints;
     // matches the project's `monitor_speed`.
