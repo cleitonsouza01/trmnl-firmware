@@ -200,20 +200,22 @@ uint8_t* display_read_file(const char* filename, int* file_size) {
 #include <SPIFFS.h>
 #include <config.h>
 #include <trmnl_log.h>
-#include <esp_heap_caps.h>
 #include "gxepd2_adapter_1248b.h"
-#include <new>
 
 #define FS SPIFFS
 
 extern Preferences preferences;
 
-// Adapter is heap-allocated in PSRAM during display_init() because GxEPD2_3C
-// holds the ~320 KB BWR frame buffer as a member array. board_build.psram =
-// enabled is silently ignored in this dual-framework env, so we can't rely on
-// EXT_RAM_BSS_ATTR; we placement-new the whole adapter into PSRAM instead.
-// Same pattern as commit f91efdc on the xiao_c6 path.
-static trmnl::GxEPD2Adapter1248B* g_adapter = nullptr;
+// Adapter lives in DRAM static BSS. GxEPD2_3C's member buffers add up to
+// ~65 KB at MAX_DISPLAY_BUFFER_SIZE = 65 536, which fits comfortably on both
+// WROOM (no PSRAM, ~256 KB DRAM total) and WROVER (with PSRAM) variants of
+// the driver board. Paged rendering does 5 passes per frame.
+static trmnl::GxEPD2Adapter1248B g_adapter(
+    EPD_M1_CS_PIN, EPD_S1_CS_PIN, EPD_M2_CS_PIN, EPD_S2_CS_PIN,
+    EPD_M1S1_DC_PIN, EPD_M2S2_DC_PIN,
+    EPD_M1S1_RST_PIN, EPD_M2S2_RST_PIN,
+    EPD_M1_BUSY_PIN, EPD_S1_BUSY_PIN, EPD_M2_BUSY_PIN, EPD_S2_BUSY_PIN,
+    EPD_SCK_PIN, EPD_MOSI_PIN);
 
 // Local PNG decoder state for the image-render path. File-static so the
 // PNGdec callback can reach it.
@@ -267,7 +269,7 @@ static int waveshare_1248b_pngDraw(PNGDRAW* pDraw) {
         const uint8_t r = ((rgb565 >> 11) & 0x1f) << 3;
         const uint8_t g = ((rgb565 >>  5) & 0x3f) << 2;
         const uint8_t b = ( rgb565        & 0x1f) << 3;
-        g_adapter->gx().drawPixel(x, y, waveshare_1248b_rgb_to_3color(r, g, b));
+        g_adapter.gx().drawPixel(x, y, waveshare_1248b_rgb_to_3color(r, g, b));
     }
     return 1;
 }
@@ -295,61 +297,19 @@ static bool waveshare_1248b_decode_png(const uint8_t* buf, int len) {
 // ---- Public display API ----
 
 void display_init(void) {
-    Log_info("waveshare_1248b: display_init");
-    // PSRAM sanity check — surfaces the WROOM-vs-WROVER mismatch loudly.
-    const size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
-    const size_t psram_free  = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    Log_info("waveshare_1248b: PSRAM total=%u free=%u",
-             (unsigned)psram_total, (unsigned)psram_free);
-    if (psram_total == 0) {
-        Log_error("waveshare_1248b: PSRAM not detected — board is likely WROOM, "
-                  "not WROVER. Rendering cannot allocate the BWR frame buffer "
-                  "in DRAM; aborting display_init.");
-        return;
-    }
-
-    if (g_adapter == nullptr) {
-        // Placement-new the whole adapter (including GxEPD2_3C's ~320 KB
-        // member buffers) into PSRAM.
-        const size_t sz = sizeof(trmnl::GxEPD2Adapter1248B);
-        void* mem = heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
-        if (mem == nullptr) {
-            Log_error("waveshare_1248b: heap_caps_malloc(%u, SPIRAM) failed for adapter",
-                      (unsigned)sz);
-            return;
-        }
-        g_adapter = new (mem) trmnl::GxEPD2Adapter1248B(
-            EPD_M1_CS_PIN, EPD_S1_CS_PIN, EPD_M2_CS_PIN, EPD_S2_CS_PIN,
-            EPD_M1S1_DC_PIN, EPD_M2S2_DC_PIN,
-            EPD_M1S1_RST_PIN, EPD_M2S2_RST_PIN,
-            EPD_M1_BUSY_PIN, EPD_S1_BUSY_PIN, EPD_M2_BUSY_PIN, EPD_S2_BUSY_PIN,
-            EPD_SCK_PIN, EPD_MOSI_PIN);
-        Log_info("waveshare_1248b: adapter constructed in PSRAM (%u bytes)",
-                 (unsigned)sz);
-    }
-    g_adapter->init();
+    Log_info("waveshare_1248b: display_init (paged mode, %u-byte buffer)",
+             (unsigned)sizeof(trmnl::GxEPD2Adapter1248B));
+    g_adapter.init();
 }
 
 uint16_t display_width() {
-    if (g_adapter == nullptr) {
-        Log_error("waveshare_1248b: display_width called before successful display_init");
-        return 0;
-    }
-    return (uint16_t)g_adapter->width();
+    return (uint16_t)g_adapter.width();
 }
 uint16_t display_height() {
-    if (g_adapter == nullptr) {
-        Log_error("waveshare_1248b: display_height called before successful display_init");
-        return 0;
-    }
-    return (uint16_t)g_adapter->height();
+    return (uint16_t)g_adapter.height();
 }
 
 void display_show_image(uint8_t* image_buffer, int data_size, bool /*bWait*/) {
-    if (g_adapter == nullptr) {
-        Log_error("waveshare_1248b: display_show_image called before successful display_init");
-        return;
-    }
     if (image_buffer == nullptr || data_size <= 0) {
         Log_error("waveshare_1248b: display_show_image called with empty buffer");
         return;
@@ -369,13 +329,13 @@ void display_show_image(uint8_t* image_buffer, int data_size, bool /*bWait*/) {
     }
 
     Log_info("waveshare_1248b: display_show_image start (%d bytes)", data_size);
-    g_adapter->gx().setFullWindow();
-    g_adapter->gx().firstPage();
+    g_adapter.gx().setFullWindow();
+    g_adapter.gx().firstPage();
     do {
-        g_adapter->gx().fillScreen(GxEPD_WHITE);
+        g_adapter.gx().fillScreen(GxEPD_WHITE);
         waveshare_1248b_decode_png(image_buffer, data_size);
-    } while (g_adapter->gx().nextPage());
-    g_adapter->powerOff();
+    } while (g_adapter.gx().nextPage());
+    g_adapter.powerOff();
     Log_info("waveshare_1248b: display_show_image end");
 }
 
@@ -417,11 +377,7 @@ void Paint_DrawMultilineText(UWORD /*x_start*/, UWORD /*y_start*/,
 
 void display_reset(void) {
     Log_info("waveshare_1248b: display_reset");
-    if (g_adapter == nullptr) {
-        Log_error("waveshare_1248b: display_reset called before successful display_init");
-        return;
-    }
-    g_adapter->init();
+    g_adapter.init();
 }
 
 void display_set_light_sleep(uint8_t /*enabled*/) {
@@ -430,11 +386,7 @@ void display_set_light_sleep(uint8_t /*enabled*/) {
 
 void display_sleep(void) {
     Log_info("waveshare_1248b: display_sleep");
-    if (g_adapter == nullptr) {
-        Log_error("waveshare_1248b: display_sleep called before successful display_init");
-        return;
-    }
-    g_adapter->sleep();
+    g_adapter.sleep();
 }
 
 // display_read_file is FS-only logic; kept identical to the existing impl so
