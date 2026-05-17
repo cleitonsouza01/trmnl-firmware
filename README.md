@@ -2,6 +2,58 @@
 
 created for the [TRMNL](https://trmnl.com) e-ink display.
 
+## **Waveshare ESP32 Driver Board + 12.48" Module B (community port)**
+
+This fork adds support for driving the Waveshare 12.48" e-Paper Module B (1304×984 black/white/red, SKU 17299, **four-controller panel**) from a Waveshare ESP32 Driver Board (SKU 15823, **WROVER variant — PSRAM required**) via [GxEPD2](https://github.com/ZinggJM/GxEPD2)'s `GxEPD2_1248c` driver class.
+
+Phase 1 (MVP) scope: WiFi connect via the existing TRMNL captive portal, `/api/setup`, `/api/display`, PNG fetch, BWR render via GxEPD2, deep-sleep until the next refresh. On-panel UX (captive-portal QR, error screens, BMP/G5 images, fonts) is deferred to a Phase 2 spec — `display_show_msg(...)` calls log a warning and don't touch the panel.
+
+Design + plan docs:
+- `docs/superpowers/specs/2026-05-10-waveshare-12in48-driver-design.md` (revised 2026-05-16)
+- `docs/superpowers/plans/2026-05-16-waveshare-1248b.md`
+
+### Wiring
+
+| Panel signal | ESP32 GPIO |
+|--------------|------------|
+| VCC          | 3V3        |
+| GND          | GND        |
+| DIN  (MOSI)  | 14         |
+| CLK  (SCK)   | 13         |
+| M1_CS        | 23         |
+| S1_CS        | 22         |
+| M2_CS        | 16         |
+| S2_CS        | 19         |
+| M1S1_DC      | 25         |
+| M2S2_DC      | 17         |
+| M1S1_RST     | 33         |
+| M2S2_RST     | 5          |
+| M1_BUSY      | 32         |
+| S1_BUSY      | 26         |
+| M2_BUSY      | 18         |
+| S2_BUSY      | 4          |
+
+The Waveshare ESP32 Driver Board's flat-flex socket is pre-wired to these pins — no manual jumpers needed with the stock cable.
+
+### Build & flash
+
+```bash
+# Build only (no board needed)
+pio run -e waveshare_1248b
+
+# Build + flash + open serial monitor
+pio run -e waveshare_1248b -t upload -t monitor
+
+# Just open the serial monitor (board already flashed)
+pio device monitor -e waveshare_1248b
+```
+
+### Hardware variant check
+
+Some lots of the Waveshare ESP32 Driver Board ship with ESP32-WROOM-32 (no PSRAM); this env is built for the ESP32-WROVER-B variant (4 MB PSRAM). The firmware logs `esp_psram_get_size()` on boot; if it reports 0, your board is WROOM and rendering will either fall back to slow paged mode or fail to allocate the BWR frame buffer.
+
+---
+
 ## **Seeed XIAO ESP32-C6 + Waveshare 7.5" V1 (community port)**
 
 This fork adds support for driving a Waveshare 7.5" V1 e-paper raw display (640×384 B/W; SKU 13187; panel GDEW075T8 / IC UC8159c) from a [Seeed XIAO ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/).
