@@ -146,8 +146,9 @@
    // + 12.48" e-Paper Module B (SKU 17299). Four-controller panel driven via
    // GxEPD2's GxEPD2_1248c class on hardware SPI.
    //
-   // Reference: /Users/cleiton/projects/eletronics/12.48inch-e-paper/esp32/
-   //            esp32-epd-12in48/src/DEV_Config.h
+   // Reference: Waveshare's "12.48inch-e-paper" sample repo
+   //   (esp32/esp32-epd-12in48/src/DEV_Config.h on GitHub:
+   //    https://github.com/waveshareteam/12.48inch-e-paper)
 
    // Shared SPI bus
    #define EPD_SCK_PIN        13
