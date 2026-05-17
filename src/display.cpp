@@ -231,6 +231,10 @@ static inline uint16_t waveshare_1248b_rgb_to_3color(uint8_t r,
     if (r > 180 && g < 100 && b < 100) return GxEPD_RED;
     // Dark across the board → black
     if (r < 100 && g < 100 && b < 100) return GxEPD_BLACK;
+    // Everything in the 100–180 grey zone collapses to white. Acceptable for
+    // a Phase 1 MVP because the TRMNL backend is expected to pre-quantize
+    // images to BWR; anti-aliased text edges or unquantised gradients will
+    // wash out here. Phase 2 can introduce dithering or a tighter palette.
     return GxEPD_WHITE;
 }
 
@@ -249,9 +253,11 @@ static int waveshare_1248b_pngDraw(PNGDRAW* pDraw) {
     const uint16_t max_x = (uint16_t)GxEPD2_1248c::WIDTH;
     const uint16_t end_x = pDraw->iWidth < max_x ? pDraw->iWidth : max_x;
 
-    // RGB565 line buffer. WIDTH = 1304 → 2608 bytes on the stack per call.
-    // Acceptable: default PlatformIO Arduino task stack on ESP32 is 8 KB.
-    uint16_t line565[GxEPD2_1248c::WIDTH];
+    // RGB565 line buffer. WIDTH = 1304 → 2608 bytes. Kept static (not on
+    // the stack) because PNGdec calls this callback ~984 times per frame
+    // and we'd rather not eat that much of the Arduino task stack on each
+    // call. PNGdec is single-threaded inside one decode, so static is safe.
+    static uint16_t line565[GxEPD2_1248c::WIDTH];
     s_png_1248b.getLineAsRGB565(pDraw, line565,
                                 PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
 
