@@ -11,6 +11,11 @@ Phase 1 (MVP) scope: WiFi connect via the existing TRMNL captive portal, `/api/s
 Design + plan docs:
 - `docs/superpowers/specs/2026-05-10-waveshare-12in48-driver-design.md` (revised 2026-05-16)
 - `docs/superpowers/plans/2026-05-16-waveshare-1248b.md`
+- `docs/superpowers/plans/2026-05-17-waveshare-1248b-wroom-fallback.md` (WROOM-32 paged-mode follow-up)
+
+Self-hosting / BYOS server adaptation: `docs/byos-waveshare-1248b.md` — covers the
+device model name, image format (1304×984 BWR PNG), and per-quadrant byte layout
+the panel's four controllers expect.
 
 ### Wiring
 
@@ -50,7 +55,9 @@ pio device monitor -e waveshare_1248b
 
 ### Hardware variant check
 
-Both WROOM-32 and WROVER-B variants of the driver board are supported. The firmware uses paged-mode rendering with a ~65 KB DRAM frame buffer — no PSRAM required. A full panel refresh takes roughly 35–45 s (the panel itself dominates; the 5 paged passes add ~5 s of decode work).
+Both WROOM-32 and WROVER-B variants of the driver board are supported. The firmware uses paged-mode rendering with a ~65 KB DRAM frame buffer — no PSRAM required. A full panel refresh takes roughly 35–45 s end-to-end: ~5–10 s of paged PNG decode + per-byte SPI to all four controllers, then ~25–30 s of panel BUSY while the e-ink waveform runs.
+
+The render path holds the Arduino loop task for the full duration; the firmware suspends the loop-task watchdog (`disableLoopWDT()` / `enableLoopWDT()`) around `display_show_image` so the long synchronous SPI burst doesn't trip it. GxEPD2's internal BUSY timeout is also bumped from its 20 s default to 35 s in `GxEPD2Adapter1248B::init()` to match this panel's real refresh time.
 
 ---
 
